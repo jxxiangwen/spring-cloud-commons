@@ -37,105 +37,113 @@ import org.springframework.jmx.export.annotation.ManagedResource;
 import org.springframework.stereotype.Component;
 
 /**
+ * 关注EnvironmentChangeEvent事件,重新绑定所有使用了ConfigurationProperties注解的bean
  * Listens for {@link EnvironmentChangeEvent} and rebinds beans that were bound to the
  * {@link Environment} using {@link ConfigurationProperties
  * <code>@ConfigurationProperties</code>}. When these beans are re-bound and
  * re-initialized the changes are available immediately to any component that is using the
  * <code>@ConfigurationProperties</code> bean.
  *
- * @see RefreshScope for a deeper and optionally more focused refresh of bean components
- *
  * @author Dave Syer
- *
+ * @see RefreshScope for a deeper and optionally more focused refresh of bean components
  */
 @Component
 @ManagedResource
 public class ConfigurationPropertiesRebinder
-		implements ApplicationContextAware, ApplicationListener<EnvironmentChangeEvent> {
+        implements ApplicationContextAware, ApplicationListener<EnvironmentChangeEvent> {
 
-	private ConfigurationPropertiesBeans beans;
+    /**
+     * ConfigurationPropertiesBeans 需要一个 ConfigurationBeanFactoryMetaData，
+     * 这个类逻辑很简单，它是一个 BeanFactoryPostProcessor 的实现，将所有的 Bean 都存在了内部的一个 Map 中。
+     */
+    private ConfigurationPropertiesBeans beans;
 
-	private ConfigurationPropertiesBindingPostProcessor binder;
+    private ConfigurationPropertiesBindingPostProcessor binder;
 
-	private ApplicationContext applicationContext;
+    private ApplicationContext applicationContext;
 
-	private Map<String, Exception> errors = new ConcurrentHashMap<>();
+    private Map<String, Exception> errors = new ConcurrentHashMap<>();
 
-	public ConfigurationPropertiesRebinder(
-			ConfigurationPropertiesBindingPostProcessor binder,
-			ConfigurationPropertiesBeans beans) {
-		this.binder = binder;
-		this.beans = beans;
-	}
+    public ConfigurationPropertiesRebinder(
+            ConfigurationPropertiesBindingPostProcessor binder,
+            ConfigurationPropertiesBeans beans) {
+        this.binder = binder;
+        this.beans = beans;
+    }
 
-	@Override
-	public void setApplicationContext(ApplicationContext applicationContext)
-			throws BeansException {
-		this.applicationContext = applicationContext;
-	}
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext)
+            throws BeansException {
+        this.applicationContext = applicationContext;
+    }
 
-	/**
-	 * A map of bean name to errors when instantiating the bean.
-	 *
-	 * @return the errors accumulated since the latest destroy
-	 */
-	public Map<String, Exception> getErrors() {
-		return this.errors;
-	}
+    /**
+     * A map of bean name to errors when instantiating the bean.
+     *
+     * @return the errors accumulated since the latest destroy
+     */
+    public Map<String, Exception> getErrors() {
+        return this.errors;
+    }
 
-	@ManagedOperation
-	public void rebind() {
-		this.errors.clear();
-		for (String name : this.beans.getBeanNames()) {
-			rebind(name);
-		}
-	}
+    @ManagedOperation
+    public void rebind() {
+        this.errors.clear();
+        for (String name : this.beans.getBeanNames()) {
+            rebind(name);
+        }
+    }
 
-	@ManagedOperation
-	public boolean rebind(String name) {
-		if (!this.beans.getBeanNames().contains(name)) {
-			return false;
-		}
-		if (this.applicationContext != null) {
-			try {
-				Object bean = this.applicationContext.getBean(name);
-				if (AopUtils.isCglibProxy(bean)) {
-					bean = getTargetObject(bean);
-				}
-				this.binder.postProcessBeforeInitialization(bean, name);
-				this.applicationContext.getAutowireCapableBeanFactory()
-						.initializeBean(bean, name);
-				return true;
-			}
-			catch (RuntimeException e) {
-				this.errors.put(name, e);
-				throw e;
-			}
-		}
-		return false;
-	}
+    @ManagedOperation
+    public boolean rebind(String name) {
+        if (!this.beans.getBeanNames().contains(name)) {
+            return false;
+        }
+        if (this.applicationContext != null) {
+            try {
+                Object bean = this.applicationContext.getBean(name);
+                if (AopUtils.isCglibProxy(bean)) {
+                    bean = getTargetObject(bean);
+                }
+                this.binder.postProcessBeforeInitialization(bean, name);
+                // 初始化bean
+                // 1. applyBeanPostProcessorsBeforeInitialization：调用所有 BeanPostProcessor
+                // 的 postProcessBeforeInitialization 方法。
+                // 2. invokeInitMethods：如果 Bean 继承了 InitializingBean，
+                // 执行 afterPropertiesSet 方法，或是如果 Bean 指定了 init-method 属性，如果有则调用对应方法
+                // 3. applyBeanPostProcessorsAfterInitialization：调用所有
+                // BeanPostProcessor 的 postProcessAfterInitialization 方法。
+                this.applicationContext.getAutowireCapableBeanFactory()
+                        .initializeBean(bean, name);
+                return true;
+            } catch (RuntimeException e) {
+                this.errors.put(name, e);
+                throw e;
+            }
+        }
+        return false;
+    }
 
-	@SuppressWarnings("unchecked")
-	private static <T> T getTargetObject(Object candidate) {
-		try {
-			if (AopUtils.isAopProxy(candidate) && (candidate instanceof Advised)) {
-				return (T) ((Advised) candidate).getTargetSource().getTarget();
-			}
-		}
-		catch (Exception ex) {
-			throw new IllegalStateException("Failed to unwrap proxied object", ex);
-		}
-		return (T) candidate;
-	}
+    @SuppressWarnings("unchecked")
+    private static <T> T getTargetObject(Object candidate) {
+        try {
+            if (AopUtils.isAopProxy(candidate) && (candidate instanceof Advised)) {
+                return (T) ((Advised) candidate).getTargetSource().getTarget();
+            }
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to unwrap proxied object", ex);
+        }
+        return (T) candidate;
+    }
 
-	@ManagedAttribute
-	public Set<String> getBeanNames() {
-		return new HashSet<String>(this.beans.getBeanNames());
-	}
+    @ManagedAttribute
+    public Set<String> getBeanNames() {
+        return new HashSet<String>(this.beans.getBeanNames());
+    }
 
-	@Override
-	public void onApplicationEvent(EnvironmentChangeEvent event) {
-		rebind();
-	}
+    @Override
+    public void onApplicationEvent(EnvironmentChangeEvent event) {
+        rebind();
+    }
 
 }

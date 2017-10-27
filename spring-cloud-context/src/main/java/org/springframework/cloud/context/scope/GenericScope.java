@@ -58,6 +58,9 @@ public class GenericScope implements Scope, BeanFactoryPostProcessor, Disposable
 
 	public static final String SCOPED_TARGET_PREFIX = "scopedTarget.";
 
+	/**
+	 * cache，用于缓存所有已经生成的 Bean，在调用 get 方法时尝试从缓存加载，如果没有的话就生成一个新对象放入缓存，并通过 getBean 初始化其对应的 Bean
+	 */
 	private BeanLifecycleWrapperCache cache = new BeanLifecycleWrapperCache(
 			new StandardScopeCache());
 

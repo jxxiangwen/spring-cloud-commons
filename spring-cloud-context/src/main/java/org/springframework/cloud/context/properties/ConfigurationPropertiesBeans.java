@@ -86,6 +86,8 @@ ApplicationContextAware {
 		if (isRefreshScoped(beanName)) {
 			return bean;
 		}
+		// 查看bean是否使用了ConfigurationProperties注解
+		// 实现了就放入beans map中
 		ConfigurationProperties annotation = AnnotationUtils.findAnnotation(
 				bean.getClass(), ConfigurationProperties.class);
 		if (annotation != null) {

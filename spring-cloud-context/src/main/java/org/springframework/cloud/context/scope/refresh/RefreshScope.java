@@ -40,7 +40,7 @@ import org.springframework.jmx.export.annotation.ManagedResource;
  * externalized content (property placeholders or expressions in string literals) is
  * re-evaluated when it is created.
  * </p>
- *
+ * <p>
  * <p>
  * Note that all beans in this scope are <em>only</em> initialized when first accessed, so
  * the scope forces lazy initialization semantics. The implementation involves creating a
@@ -52,7 +52,7 @@ import org.springframework.jmx.export.annotation.ManagedResource;
  * all its beans, there is no need to add <code>&lt;aop:auto-proxy/&gt;</code> to any bean
  * definitions.
  * </p>
- *
+ * <p>
  * <p>
  * The scoped proxy approach adopted here has a side benefit that bean instances are
  * automatically {@link Serializable}, and can be sent across the wire as long as the
@@ -65,89 +65,92 @@ import org.springframework.jmx.export.annotation.ManagedResource;
  * </p>
  *
  * @author Dave Syer
- *
  * @since 3.1
- *
+ * 所有 @RefreshScope 的 Bean 都是延迟加载的，只有在第一次访问时才会初始化
+ * 刷新 Bean 也是同理，下次访问时会创建一个新的对象
  */
 @ManagedResource
 public class RefreshScope extends GenericScope
-		implements ApplicationContextAware, BeanDefinitionRegistryPostProcessor, Ordered {
+        implements ApplicationContextAware, BeanDefinitionRegistryPostProcessor, Ordered {
 
-	private ApplicationContext context;
-	private BeanDefinitionRegistry registry;
-	private boolean eager = true;
-	private int order = Ordered.LOWEST_PRECEDENCE - 100;
+    private ApplicationContext context;
+    private BeanDefinitionRegistry registry;
+    private boolean eager = true;
+    private int order = Ordered.LOWEST_PRECEDENCE - 100;
 
-	/**
-	 * Create a scope instance and give it the default name: "refresh".
-	 */
-	public RefreshScope() {
-		super.setName("refresh");
-	}
+    /**
+     * Create a scope instance and give it the default name: "refresh".
+     */
+    public RefreshScope() {
+        super.setName("refresh");
+    }
 
-	@Override
-	public int getOrder() {
-		return this.order;
-	}
+    @Override
+    public int getOrder() {
+        return this.order;
+    }
 
-	public void setOrder(int order) {
-		this.order = order;
-	}
+    public void setOrder(int order) {
+        this.order = order;
+    }
 
-	/**
-	 * Flag to determine whether all beans in refresh scope should be instantiated eagerly
-	 * on startup. Default true.
-	 *
-	 * @param eager the flag to set
-	 */
-	public void setEager(boolean eager) {
-		this.eager = eager;
-	}
+    /**
+     * Flag to determine whether all beans in refresh scope should be instantiated eagerly
+     * on startup. Default true.
+     *
+     * @param eager the flag to set
+     */
+    public void setEager(boolean eager) {
+        this.eager = eager;
+    }
 
-	@Override
-	public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry)
-			throws BeansException {
-		this.registry = registry;
-	}
+    @Override
+    public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry)
+            throws BeansException {
+        this.registry = registry;
+    }
 
-	@EventListener
-	public void start(ContextRefreshedEvent event) {
-		if (event.getApplicationContext() == this.context) {
-			if (this.eager && this.registry != null) {
-				for (String name : this.context.getBeanDefinitionNames()) {
-					BeanDefinition definition = this.registry.getBeanDefinition(name);
-					if (this.getName().equals(definition.getScope())
-							&& !definition.isLazyInit()) {
-						this.context.getBean(name);
-					}
-				}
-			}
-		}
-	}
+    @EventListener
+    public void start(ContextRefreshedEvent event) {
+        if (event.getApplicationContext() == this.context) {
+            if (this.eager && this.registry != null) {
+                for (String name : this.context.getBeanDefinitionNames()) {
+                    BeanDefinition definition = this.registry.getBeanDefinition(name);
+                    if (this.getName().equals(definition.getScope())
+                            && !definition.isLazyInit()) {
+                        this.context.getBean(name);
+                    }
+                }
+            }
+        }
+    }
 
-	@ManagedOperation(description = "Dispose of the current instance of bean name provided and force a refresh on next method execution.")
-	public boolean refresh(String name) {
-		if (!name.startsWith(SCOPED_TARGET_PREFIX)) {
-			// User wants to refresh the bean with this name but that isn't the one in the
-			// cache...
-			name = SCOPED_TARGET_PREFIX + name;
-		}
-		// Ensure lifecycle is finished if bean was disposable
-		if (super.destroy(name)) {
-			this.context.publishEvent(new RefreshScopeRefreshedEvent(name));
-			return true;
-		}
-		return false;
-	}
+    @ManagedOperation(description = "Dispose of the current instance of bean name provided and force a refresh on next method execution.")
+    public boolean refresh(String name) {
+        if (!name.startsWith(SCOPED_TARGET_PREFIX)) {
+            // User wants to refresh the bean with this name but that isn't the one in the
+            // cache...
+            name = SCOPED_TARGET_PREFIX + name;
+        }
+        // Ensure lifecycle is finished if bean was disposable
+        if (super.destroy(name)) {
+            this.context.publishEvent(new RefreshScopeRefreshedEvent(name));
+            return true;
+        }
+        return false;
+    }
 
-	@ManagedOperation(description = "Dispose of the current instance of all beans in this scope and force a refresh on next method execution.")
-	public void refreshAll() {
-		super.destroy();
-		this.context.publishEvent(new RefreshScopeRefreshedEvent());
-	}
+    @ManagedOperation(description = "Dispose of the current instance of all beans in this scope and force a refresh on next method execution.")
+    public void refreshAll() {
+        // 使用了缓存来保存bean ,清空后每次第一次查找会新建,也就使用了新的属性
+        super.destroy();
+        // 发出一个 RefreshScopeRefreshedEvent 事件，在某些 Spring Cloud 的组件中会监听这个事件并作出一些反馈。
+        // Zuul 在收到这个事件后，会将自身的路由设置为 dirty 状态
+        this.context.publishEvent(new RefreshScopeRefreshedEvent());
+    }
 
-	@Override
-	public void setApplicationContext(ApplicationContext context) throws BeansException {
-		this.context = context;
-	}
+    @Override
+    public void setApplicationContext(ApplicationContext context) throws BeansException {
+        this.context = context;
+    }
 }
